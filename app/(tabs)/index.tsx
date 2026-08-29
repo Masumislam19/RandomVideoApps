@@ -1,168 +1,129 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
-} from 'react-native';
+import React from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
 
 export default function HomeScreen() {
-  const [gender, setGender] = useState<'Male' | 'Female' | ''>('');
-
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.logo}>VibeConnect</Text>
-        <Text style={styles.online}>● Online</Text>
-      </View>
-
-      <View style={styles.content}>
-        <Text style={styles.title}>Meet Someone New</Text>
-        <Text style={styles.subtitle}>
-          Random 1-to-1 video conversations
-        </Text>
-
-        <Text style={styles.choose}>Choose your gender</Text>
-
-        <View style={styles.genderRow}>
-          <TouchableOpacity
-            style={[
-              styles.genderButton,
-              gender === 'Male' && styles.selected,
-            ]}
-            onPress={() => setGender('Male')}
-          >
-            <Text style={styles.genderEmoji}>👨</Text>
-            <Text style={styles.genderText}>Male</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.genderButton,
-              gender === 'Female' && styles.selected,
-            ]}
-            onPress={() => setGender('Female')}
-          >
-            <Text style={styles.genderEmoji}>👩</Text>
-            <Text style={styles.genderText}>Female</Text>
-          </TouchableOpacity>
+        <View>
+          <Text style={styles.title}>VibeConnect</Text>
+          <Text style={styles.subtitle}>Meet someone new</Text>
         </View>
 
-        <TouchableOpacity
-          style={[
-            styles.matchButton,
-            !gender && styles.disabled,
-          ]}
-          disabled={!gender}
-          onPress={() => {}}
+        <Pressable
+          style={styles.profileButton}
+          onPress={() => router.push('/login')}
         >
-          <Text style={styles.matchText}>🔀  Start Random Match</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.note}>
-          Be respectful and have fun ✨
-        </Text>
+          <Text style={styles.profileIcon}>👤</Text>
+        </Pressable>
       </View>
-    </SafeAreaView>
+
+      <View style={styles.center}>
+        <View style={styles.logoCircle}>
+          <Text style={styles.logo}>VC</Text>
+        </View>
+
+        <Text style={styles.heading}>Ready to connect?</Text>
+
+        <Text style={styles.description}>
+          Start a random video chat and meet someone new.
+        </Text>
+
+        <Pressable
+          style={styles.matchButton}
+          onPress={() => router.push('/match')}
+        >
+          <Text style={styles.matchText}>🎥  Start Random Match</Text>
+        </Pressable>
+
+        <Text style={styles.note}>You can skip anytime</Text>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#08131c',
+    backgroundColor: '#05090d',
+    paddingHorizontal: 20,
   },
   header: {
-    paddingHorizontal: 22,
-    paddingTop: 15,
-    paddingBottom: 10,
+    marginTop: 55,
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  logo: {
-    color: '#ffffff',
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  online: {
-    color: '#35d07f',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 25,
   },
   title: {
-    color: '#ffffff',
-    fontSize: 30,
-    fontWeight: '800',
-    textAlign: 'center',
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: '900',
   },
   subtitle: {
-    color: '#9aa9b5',
-    fontSize: 16,
-    marginTop: 10,
-    textAlign: 'center',
+    color: '#8b9aa3',
+    marginTop: 4,
+    fontSize: 14,
   },
-  choose: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '700',
-    marginTop: 45,
-    marginBottom: 18,
-  },
-  genderRow: {
-    flexDirection: 'row',
-    gap: 15,
-  },
-  genderButton: {
-    width: 135,
-    height: 125,
-    borderRadius: 18,
-    backgroundColor: '#12232f',
-    borderWidth: 1,
-    borderColor: '#263b49',
-    justifyContent: 'center',
+  profileButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#172129',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  selected: {
-    borderColor: '#ffffff',
-    backgroundColor: '#1b3444',
+  profileIcon: {
+    fontSize: 22,
   },
-  genderEmoji: {
-    fontSize: 42,
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: 80,
   },
-  genderText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
-    marginTop: 7,
+  logoCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#172129',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 25,
+  },
+  logo: {
+    color: '#35d07f',
+    fontSize: 30,
+    fontWeight: '900',
+  },
+  heading: {
+    color: '#fff',
+    fontSize: 25,
+    fontWeight: '800',
+  },
+  description: {
+    color: '#8b9aa3',
+    fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginTop: 10,
+    maxWidth: 300,
   },
   matchButton: {
-    marginTop: 35,
-    width: '100%',
-    height: 58,
+    backgroundColor: '#35d07f',
+    paddingHorizontal: 30,
+    paddingVertical: 17,
     borderRadius: 30,
-    backgroundColor: '#ffffff',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  disabled: {
-    opacity: 0.35,
+    marginTop: 28,
   },
   matchText: {
-    color: '#08131c',
-    fontSize: 17,
+    color: '#06100b',
+    fontSize: 16,
     fontWeight: '800',
   },
   note: {
-    color: '#71818d',
-    marginTop: 18,
+    color: '#66747c',
     fontSize: 13,
+    marginTop: 14,
   },
 });
