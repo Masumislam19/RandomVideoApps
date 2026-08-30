@@ -21,7 +21,7 @@ const waitingUsers = [];
 app.get('/', (req, res) => {
   res.json({
     status: 'ok',
-    service: 'VibeConnect Match Server',
+    service: 'VibeConnect Match + WebRTC Server',
   });
 });
 
@@ -52,8 +52,15 @@ function findMatch(socket) {
     socket.data.partnerId = otherId;
     otherSocket.data.partnerId = socket.id;
 
-    socket.emit('matched', { partnerId: otherId });
-    otherSocket.emit('matched', { partnerId: socket.id });
+    socket.emit('matched', {
+      partnerId: otherId,
+      initiator: true,
+    });
+
+    otherSocket.emit('matched', {
+      partnerId: socket.id,
+      initiator: false,
+    });
 
     return;
   }
@@ -62,11 +69,43 @@ function findMatch(socket) {
   socket.emit('waiting');
 }
 
+function relayToPartner(socket, event, payload) {
+  const partnerId = socket.data.partnerId;
+
+  if (!partnerId) {
+    return;
+  }
+
+  const partner = io.sockets.sockets.get(partnerId);
+
+  if (partner) {
+    partner.emit(event, payload);
+  }
+}
+
 io.on('connection', (socket) => {
   console.log('Connected:', socket.id);
 
   socket.on('find_match', () => {
     findMatch(socket);
+  });
+
+  socket.on('offer', ({ offer }) => {
+    relayToPartner(socket, 'offer', {
+      offer,
+    });
+  });
+
+  socket.on('answer', ({ answer }) => {
+    relayToPartner(socket, 'answer', {
+      answer,
+    });
+  });
+
+  socket.on('ice-candidate', ({ candidate }) => {
+    relayToPartner(socket, 'ice-candidate', {
+      candidate,
+    });
   });
 
   socket.on('next', () => {
