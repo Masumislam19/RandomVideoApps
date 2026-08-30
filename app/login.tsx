@@ -2,79 +2,97 @@ import React, { useState } from 'react';
 import {
   Alert,
   Pressable,
+  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { router } from 'expo-router';
-import { getUser } from '@/lib/auth';
+import { supabase } from '@/lib/supabase';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
   async function handleLogin() {
-    if (!email.trim() || !password.trim()) {
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail || !password) {
       Alert.alert('Missing information', 'Email and password are required.');
       return;
     }
 
-    const user = await getUser();
+    try {
+      setLoading(true);
 
-    if (!user) {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password,
+      });
+
+      if (error) throw error;
+
+      router.replace('/profile');
+    } catch (error: any) {
       Alert.alert(
-        'No account found',
-        'Please create an account first.'
+        'Login failed',
+        error?.message || 'Invalid email or password.',
       );
-      return;
+    } finally {
+      setLoading(false);
     }
-
-    if (email.trim().toLowerCase() !== user.email.toLowerCase()) {
-      Alert.alert('Login failed', 'Email does not match the saved account.');
-      return;
-    }
-
-    router.replace('/');
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.logo}>VibeConnect</Text>
-      <Text style={styles.title}>Welcome back</Text>
-      <Text style={styles.subtitle}>Sign in to continue</Text>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.card}>
+        <Text style={styles.title}>Welcome Back</Text>
+        <Text style={styles.subtitle}>Login to VibeConnect</Text>
 
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        placeholderTextColor="#71808a"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        keyboardType="email-address"
-      />
+        <TextInput
+          style={styles.input}
+          placeholder="Email"
+          placeholderTextColor="#7d8790"
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
 
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        placeholderTextColor="#71808a"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          placeholderTextColor="#7d8790"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          autoCapitalize="none"
+        />
 
-      <Pressable style={styles.button} onPress={handleLogin}>
-        <Text style={styles.buttonText}>Login</Text>
-      </Pressable>
+        <Pressable
+          style={[styles.button, loading && styles.disabled]}
+          onPress={handleLogin}
+          disabled={loading}
+        >
+          <Text style={styles.buttonText}>
+            {loading ? 'Logging in...' : 'Login'}
+          </Text>
+        </Pressable>
 
-      <Pressable onPress={() => router.push('/register')}>
-        <Text style={styles.link}>Create a new account</Text>
-      </Pressable>
-
-      <Pressable onPress={() => router.back()}>
-        <Text style={styles.back}>Back</Text>
-      </Pressable>
-    </View>
+        <Pressable
+          style={styles.linkButton}
+          onPress={() => router.push('/register')}
+          disabled={loading}
+        >
+          <Text style={styles.linkText}>
+            Don't have an account? Create one
+          </Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>
   );
 }
 
@@ -82,56 +100,58 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#05090d',
-    padding: 24,
     justifyContent: 'center',
+    padding: 20,
   },
-  logo: {
-    color: '#35d07f',
-    fontSize: 28,
-    fontWeight: '900',
-    textAlign: 'center',
-    marginBottom: 35,
+  card: {
+    width: '100%',
+    maxWidth: 500,
+    alignSelf: 'center',
   },
   title: {
     color: '#fff',
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: 30,
+    fontWeight: '900',
+    textAlign: 'center',
   },
   subtitle: {
     color: '#8b9aa3',
-    marginTop: 6,
-    marginBottom: 25,
+    fontSize: 15,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 30,
   },
   input: {
-    backgroundColor: '#121b21',
+    backgroundColor: '#111820',
     color: '#fff',
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 15,
+    paddingVertical: 14,
     marginBottom: 14,
     fontSize: 16,
   },
   button: {
     backgroundColor: '#35d07f',
     borderRadius: 12,
-    paddingVertical: 16,
+    paddingVertical: 15,
     alignItems: 'center',
     marginTop: 8,
   },
+  disabled: {
+    opacity: 0.6,
+  },
   buttonText: {
-    color: '#06100b',
-    fontSize: 17,
+    color: '#041008',
+    fontSize: 16,
     fontWeight: '800',
   },
-  link: {
-    color: '#35d07f',
-    textAlign: 'center',
-    marginTop: 22,
-    fontWeight: '700',
+  linkButton: {
+    alignItems: 'center',
+    marginTop: 20,
   },
-  back: {
-    color: '#8b9aa3',
-    textAlign: 'center',
-    marginTop: 22,
+  linkText: {
+    color: '#35d07f',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
