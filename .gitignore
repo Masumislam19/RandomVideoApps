@@ -46,3 +46,4 @@ app-example
 server/node_modules/
 node_modules/
 .expo/
+.env
