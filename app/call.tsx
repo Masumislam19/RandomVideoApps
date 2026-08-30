@@ -8,27 +8,33 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
-import { io, Socket } from 'socket.io-client';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { socket, connectSocket, disconnectSocket } from '@/lib/socket';
 
-const SERVER_URL = 'https://randomvideoapps.onrender.com';
+type WebRTCModule = typeof import('react-native-webrtc');
 
 type SignalOffer = {
-  type: 'offer';
+  type: string;
   sdp?: string;
 };
 
 type SignalAnswer = {
-  type: 'answer';
+  type: string;
   sdp?: string;
 };
 
 export default function CallScreen() {
-  const params = useLocalSearchParams<{ partnerId?: string }>();
+  const router = useRouter();
+  const params = useLocalSearchParams<{
+    partnerId?: string;
+    initiator?: string;
+  }>();
 
-  const socketRef = useRef<Socket | null>(null);
+  const partnerId = params.partnerId ?? null;
+  const initiator = params.initiator === 'true';
+
+  const webrtcRef = useRef<WebRTCModule | null>(null);
   const peerRef = useRef<any>(null);
-  const webRTCRef = useRef<any>(null);
   const localStreamRef = useRef<any>(null);
 
   const [localStream, setLocalStream] = useState<any>(null);
@@ -37,8 +43,11 @@ export default function CallScreen() {
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
 
+  const startingRef = useRef(false);
+  const cleanedRef = useRef(false);
+
   useEffect(() => {
-    start();
+    startCall();
 
     return () => {
       cleanup();
@@ -46,18 +55,24 @@ export default function CallScreen() {
   }, []);
 
   async function loadWebRTC() {
-    if (webRTCRef.current) {
-      return webRTCRef.current;
+    if (webrtcRef.current) {
+      return webrtcRef.current;
     }
 
     const module = await import('react-native-webrtc');
-    webRTCRef.current = module;
+    webrtcRef.current = module;
+
     return module;
   }
 
-  async function start() {
+  async function startCall() {
+    if (startingRef.current) return;
+
+    startingRef.current = true;
+    cleanedRef.current = false;
+
     try {
-      setStatus('Loading camera...');
+      setStatus('Loading video system...');
 
       const WebRTC = await loadWebRTC();
 
@@ -73,166 +88,27 @@ export default function CallScreen() {
         },
       });
 
+      if (cleanedRef.current) {
+        stream.getTracks().forEach((track: any) => track.stop());
+        return;
+      }
+
       localStreamRef.current = stream;
       setLocalStream(stream);
 
-      setStatus('Connecting to matchmaking server...');
+      setStatus('Connecting to server...');
 
-      const socket = io(SERVER_URL, {
-        transports: ['websocket'],
-        reconnection: true,
-      });
+      if (!socket.connected) {
+        connectSocket();
+      }
 
-      socketRef.current = socket;
-
-      socket.on('connect', () => {
-        console.log('Connected:', socket.id);
-
-        setStatus('Finding someone...');
-
-        /*
-         * IMPORTANT:
-         * This matches server/index.js
-         */
-        socket.emit('find_match');
-      });
-
-      socket.on('waiting', () => {
-        setStatus('Waiting for someone...');
-      });
-
-      socket.on(
-        'matched',
-        async ({ partnerId }: { partnerId: string }) => {
-          try {
-            console.log('Matched with:', partnerId);
-
-            setStatus('Match found! Connecting video...');
-
-            /*
-             * The first user creates the offer.
-             * We use socket.id comparison so both phones
-             * don't create offers simultaneously.
-             */
-            const shouldInitiate =
-              String(socket.id) < String(partnerId);
-
-            await createPeer();
-
-            if (shouldInitiate) {
-              const peer = peerRef.current;
-
-              const offer = await peer.createOffer();
-
-              await peer.setLocalDescription(offer);
-
-              socket.emit('offer', {
-                offer: {
-                  type: 'offer',
-                  sdp: offer.sdp,
-                },
-              });
-            }
-          } catch (error) {
-            console.log('Match error:', error);
-            setStatus('Video connection error');
-          }
-        },
-      );
-
-      socket.on(
-        'offer',
-        async ({ offer }: { offer: SignalOffer }) => {
-          try {
-            if (!offer?.sdp) {
-              throw new Error('Offer SDP missing');
-            }
-
-            setStatus('Receiving video connection...');
-
-            const peer = await createPeer();
-
-            await peer.setRemoteDescription({
-              type: 'offer',
-              sdp: offer.sdp,
-            });
-
-            const answer = await peer.createAnswer();
-
-            await peer.setLocalDescription(answer);
-
-            socket.emit('answer', {
-              answer: {
-                type: 'answer',
-                sdp: answer.sdp,
-              },
-            });
-          } catch (error) {
-            console.log('Offer error:', error);
-            setStatus('Offer connection error');
-          }
-        },
-      );
-
-      socket.on(
-        'answer',
-        async ({ answer }: { answer: SignalAnswer }) => {
-          try {
-            const peer = peerRef.current;
-
-            if (!peer || !answer?.sdp) {
-              return;
-            }
-
-            await peer.setRemoteDescription({
-              type: 'answer',
-              sdp: answer.sdp,
-            });
-          } catch (error) {
-            console.log('Answer error:', error);
-          }
-        },
-      );
-
-      socket.on(
-        'ice-candidate',
-        async ({ candidate }: { candidate: any }) => {
-          try {
-            const peer = peerRef.current;
-
-            if (!peer || !candidate) {
-              return;
-            }
-
-            await peer.addIceCandidate(candidate);
-          } catch (error) {
-            console.log('ICE error:', error);
-          }
-        },
-      );
-
-      socket.on('partner_left', () => {
-        cleanupPeer();
-        setRemoteStream(null);
-        setStatus('Partner left. Finding someone...');
-
-        setTimeout(() => {
-          if (socketRef.current?.connected) {
-            socketRef.current.emit('find_match');
-          }
-        }, 500);
-      });
-
-      socket.on('connect_error', (error) => {
-        console.log('Socket error:', error);
-        setStatus('Server connection failed');
-      });
-
-      socket.on('disconnect', () => {
-        setStatus('Server disconnected');
-      });
+      if (socket.connected) {
+        setupMatch();
+      } else {
+        socket.once('connect', setupMatch);
+      }
     } catch (error) {
-      console.log('Start error:', error);
+      console.log('Start call error:', error);
 
       setStatus('Camera & microphone required');
 
@@ -241,6 +117,32 @@ export default function CallScreen() {
         'Please allow camera and microphone permission to use video chat.',
       );
     }
+  }
+
+  function setupMatch() {
+    if (cleanedRef.current) return;
+
+    console.log('Call screen socket:', socket.id);
+    console.log('Partner:', partnerId);
+    console.log('Initiator:', initiator);
+
+    setStatus('Preparing video connection...');
+
+    /*
+     * Match screen already matched these two users.
+     * Do NOT call find_match again here.
+     *
+     * The server keeps the partner relationship on the socket.
+     */
+    setTimeout(() => {
+      if (cleanedRef.current) return;
+
+      if (initiator) {
+        createOffer();
+      } else {
+        setStatus('Waiting for video connection...');
+      }
+    }, 300);
   }
 
   async function createPeer() {
@@ -271,50 +173,152 @@ export default function CallScreen() {
       });
     }
 
-    peer.addEventListener('icecandidate', (event: any) => {
-      if (!event.candidate) {
-        return;
-      }
+    (peer as any).addEventListener('icecandidate', (event: any) => {
+      if (!event.candidate) return;
 
-      socketRef.current?.emit('ice-candidate', {
+      socket.emit('ice-candidate', {
         candidate: event.candidate,
       });
     });
 
-    peer.addEventListener('track', (event: any) => {
-      console.log('Remote track received');
+    (peer as any).addEventListener('track', (event: any) => {
+      console.log('Remote video track received');
 
-      if (event.streams?.length) {
+      if (event.streams && event.streams.length > 0) {
         setRemoteStream(event.streams[0]);
         setStatus('Connected');
       }
     });
 
-    peer.addEventListener('connectionstatechange', () => {
+    (peer as any).addEventListener('connectionstatechange', () => {
       const state = peer.connectionState;
 
       console.log('WebRTC state:', state);
 
+      if (state === 'connecting') {
+        setStatus('Connecting video...');
+      }
+
       if (state === 'connected') {
         setStatus('Connected');
-      } else if (state === 'connecting') {
-        setStatus('Connecting video...');
-      } else if (state === 'disconnected') {
+      }
+
+      if (state === 'disconnected') {
         setStatus('Connection lost');
-      } else if (state === 'failed') {
-        setStatus('Video connection failed');
+      }
+
+      if (state === 'failed') {
+        setStatus('Connection failed');
       }
     });
 
     return peer;
   }
 
+  async function createOffer() {
+    try {
+      setStatus('Calling...');
+
+      const peer = await createPeer();
+
+      const offer = await peer.createOffer();
+
+      await peer.setLocalDescription(offer);
+
+      socket.emit('offer', {
+        offer: {
+          type: offer.type,
+          sdp: offer.sdp,
+        },
+      });
+
+      console.log('Offer sent');
+    } catch (error) {
+      console.log('Create offer error:', error);
+      setStatus('Video connection error');
+    }
+  }
+
+  async function handleOffer(offer: SignalOffer) {
+    try {
+      if (!offer?.sdp) {
+        throw new Error('Offer SDP missing');
+      }
+
+      setStatus('Receiving call...');
+
+      const peer = await createPeer();
+
+      await peer.setRemoteDescription({
+        type: 'offer',
+        sdp: offer.sdp,
+      });
+
+      const answer = await peer.createAnswer();
+
+      await peer.setLocalDescription(answer);
+
+      socket.emit('answer', {
+        answer: {
+          type: answer.type,
+          sdp: answer.sdp,
+        },
+      });
+
+      console.log('Answer sent');
+    } catch (error) {
+      console.log('Handle offer error:', error);
+      setStatus('Video connection error');
+    }
+  }
+
+  async function handleAnswer(answer: SignalAnswer) {
+    try {
+      if (!answer?.sdp) return;
+
+      const peer = peerRef.current;
+
+      if (!peer) return;
+
+      await peer.setRemoteDescription({
+        type: 'answer',
+        sdp: answer.sdp,
+      });
+
+      console.log('Answer received');
+    } catch (error) {
+      console.log('Handle answer error:', error);
+    }
+  }
+
+  async function handleIceCandidate(candidate: any) {
+    try {
+      const peer = peerRef.current;
+
+      if (!peer || !candidate) return;
+
+      await peer.addIceCandidate(candidate);
+    } catch (error) {
+      console.log('ICE candidate error:', error);
+    }
+  }
+
+  function handlePartnerLeft() {
+    cleanupPeer();
+    setRemoteStream(null);
+    setStatus('Partner left');
+
+    setTimeout(() => {
+      if (cleanedRef.current) return;
+
+      router.replace('/match' as any);
+    }, 700);
+  }
+
   function toggleMic() {
     const stream = localStreamRef.current;
 
-    if (!stream) {
-      return;
-    }
+    if (!stream) return;
 
     stream.getAudioTracks().forEach((track: any) => {
       track.enabled = !track.enabled;
@@ -326,9 +330,7 @@ export default function CallScreen() {
   function toggleCamera() {
     const stream = localStreamRef.current;
 
-    if (!stream) {
-      return;
-    }
+    if (!stream) return;
 
     stream.getVideoTracks().forEach((track: any) => {
       track.enabled = !track.enabled;
@@ -341,9 +343,17 @@ export default function CallScreen() {
     cleanupPeer();
 
     setRemoteStream(null);
-    setStatus('Finding someone...');
+    setStatus('Finding next person...');
 
-    socketRef.current?.emit('next');
+    if (socket.connected) {
+      socket.emit('next');
+    }
+
+    setTimeout(() => {
+      if (cleanedRef.current) return;
+
+      router.replace('/match' as any);
+    }, 400);
   }
 
   function cleanupPeer() {
@@ -359,13 +369,17 @@ export default function CallScreen() {
   }
 
   function cleanup() {
-    cleanupPeer();
+    if (cleanedRef.current) return;
 
-    if (socketRef.current) {
-      socketRef.current.removeAllListeners();
-      socketRef.current.disconnect();
-      socketRef.current = null;
-    }
+    cleanedRef.current = true;
+
+    socket.off('offer', handleOffer);
+    socket.off('answer', handleAnswer);
+    socket.off('ice-candidate', handleIceCandidate);
+    socket.off('partner_left', handlePartnerLeft);
+    socket.off('connect', setupMatch);
+
+    cleanupPeer();
 
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track: any) => {
@@ -374,6 +388,13 @@ export default function CallScreen() {
 
       localStreamRef.current = null;
     }
+
+    setRemoteStream(null);
+
+    /*
+     * Disconnect only when leaving the call completely.
+     */
+    disconnectSocket();
   }
 
   function leaveCall() {
@@ -381,7 +402,21 @@ export default function CallScreen() {
     router.back();
   }
 
-  const RTCView = webRTCRef.current?.RTCView;
+  useEffect(() => {
+    socket.on('offer', handleOffer);
+    socket.on('answer', handleAnswer);
+    socket.on('ice-candidate', handleIceCandidate);
+    socket.on('partner_left', handlePartnerLeft);
+
+    return () => {
+      socket.off('offer', handleOffer);
+      socket.off('answer', handleAnswer);
+      socket.off('ice-candidate', handleIceCandidate);
+      socket.off('partner_left', handlePartnerLeft);
+    };
+  }, []);
+
+  const RTCViewComponent = webrtcRef.current?.RTCView;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -391,33 +426,41 @@ export default function CallScreen() {
       />
 
       <View style={styles.videoArea}>
-        {remoteStream && RTCView ? (
-          React.createElement(RTCView, {
+        {remoteStream && RTCViewComponent ? (
+          React.createElement(RTCViewComponent, {
             streamURL: remoteStream.toURL(),
             style: styles.remoteVideo,
             objectFit: 'cover',
           })
         ) : (
           <View style={styles.waiting}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>👤</Text>
+            <View style={styles.waitingCircle}>
+              <Text style={styles.waitingEmoji}>
+                👤
+              </Text>
             </View>
 
-            <Text style={styles.title}>
+            <Text style={styles.waitingTitle}>
               {status}
             </Text>
 
-            <Text style={styles.subtitle}>
-              {params.partnerId
-                ? 'Connecting to your match...'
-                : 'Looking for a random user...'}
+            <Text style={styles.waitingStatus}>
+              {partnerId
+                ? 'Connecting with your matched user...'
+                : 'Preparing video chat...'}
             </Text>
+
+            <View style={styles.loadingDots}>
+              <View style={styles.loadingDot} />
+              <View style={styles.loadingDot} />
+              <View style={styles.loadingDot} />
+            </View>
           </View>
         )}
 
-        {localStream && RTCView && (
+        {localStream && RTCViewComponent && (
           <View style={styles.localContainer}>
-            {React.createElement(RTCView, {
+            {React.createElement(RTCViewComponent, {
               streamURL: localStream.toURL(),
               style: styles.localVideo,
               objectFit: 'cover',
@@ -426,7 +469,9 @@ export default function CallScreen() {
 
             {!cameraOn && (
               <View style={styles.cameraOff}>
-                <Text style={styles.cameraOffText}>📷</Text>
+                <Text style={styles.cameraOffText}>
+                  📷
+                </Text>
               </View>
             )}
           </View>
@@ -434,7 +479,10 @@ export default function CallScreen() {
 
         <View style={styles.topBar}>
           <View>
-            <Text style={styles.logo}>VibeConnect</Text>
+            <Text style={styles.logo}>
+              VibeConnect
+            </Text>
+
             <Text style={styles.smallText}>
               Random Video Chat
             </Text>
@@ -442,6 +490,7 @@ export default function CallScreen() {
 
           <View style={styles.statusBadge}>
             <View style={styles.statusDot} />
+
             <Text style={styles.statusText}>
               {status}
             </Text>
@@ -452,6 +501,7 @@ export default function CallScreen() {
       <View style={styles.bottomPanel}>
         <View style={styles.controlRow}>
           <TouchableOpacity
+            activeOpacity={0.8}
             onPress={toggleMic}
             style={[
               styles.controlButton,
@@ -468,6 +518,7 @@ export default function CallScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
+            activeOpacity={0.8}
             onPress={toggleCamera}
             style={[
               styles.controlButton,
@@ -484,19 +535,27 @@ export default function CallScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
+            activeOpacity={0.8}
             onPress={nextPerson}
             style={styles.nextButton}
           >
+            <Text style={styles.nextIcon}>
+              ⏭
+            </Text>
+
             <Text style={styles.nextText}>
               NEXT
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
+            activeOpacity={0.8}
             onPress={leaveCall}
             style={styles.endButton}
           >
-            <Text style={styles.endIcon}>✕</Text>
+            <Text style={styles.endIcon}>
+              ✕
+            </Text>
 
             <Text style={styles.endText}>
               End
@@ -520,8 +579,8 @@ const styles = StyleSheet.create({
 
   videoArea: {
     flex: 1,
-    backgroundColor: '#08131c',
     position: 'relative',
+    backgroundColor: '#08131c',
     overflow: 'hidden',
   },
 
@@ -551,7 +610,11 @@ const styles = StyleSheet.create({
   },
 
   cameraOff: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: '#111b21',
     justifyContent: 'center',
     alignItems: 'center',
@@ -568,32 +631,48 @@ const styles = StyleSheet.create({
     paddingHorizontal: 30,
   },
 
-  avatar: {
-    width: 95,
-    height: 95,
-    borderRadius: 48,
+  waitingCircle: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
     backgroundColor: '#102630',
+    borderWidth: 1,
+    borderColor: '#23404e',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 22,
+    marginBottom: 20,
   },
 
-  avatarText: {
-    fontSize: 45,
+  waitingEmoji: {
+    fontSize: 43,
   },
 
-  title: {
+  waitingTitle: {
     color: '#ffffff',
-    fontSize: 21,
+    fontSize: 23,
     fontWeight: '900',
     textAlign: 'center',
   },
 
-  subtitle: {
+  waitingStatus: {
     color: '#81929e',
     fontSize: 13,
     marginTop: 8,
     textAlign: 'center',
+  },
+
+  loadingDots: {
+    flexDirection: 'row',
+    marginTop: 18,
+  },
+
+  loadingDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#ffffff',
+    marginHorizontal: 4,
+    opacity: 0.7,
   },
 
   topBar: {
@@ -684,8 +763,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 19,
     borderRadius: 28,
     backgroundColor: '#ffffff',
+    flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  nextIcon: {
+    color: '#061018',
+    fontSize: 20,
+    marginRight: 6,
   },
 
   nextText: {

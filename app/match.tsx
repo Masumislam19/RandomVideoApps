@@ -37,7 +37,7 @@ export default function MatchScreen() {
       // Give the UI a moment, then open real video call.
       setTimeout(() => {
         router.replace({
-          pathname: '/call',
+          pathname: '/call' as any,
           params: {
             partnerId: data.partnerId,
             initiator: data.initiator ? 'true' : 'false',
