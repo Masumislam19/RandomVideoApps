@@ -16,29 +16,34 @@ import {
 export default function MatchScreen() {
   const [status, setStatus] = useState('Connecting...');
   const [partnerId, setPartnerId] = useState<string | null>(null);
-  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     const onConnect = () => {
-      setConnected(true);
       setStatus('Finding someone...');
       socket.emit('find_match');
     };
 
-    const onDisconnect = () => {
-      setConnected(false);
-      setPartnerId(null);
-      setStatus('Server disconnected');
-    };
-
     const onWaiting = () => {
-      setPartnerId(null);
       setStatus('Waiting for someone...');
     };
 
-    const onMatched = (data: { partnerId: string }) => {
+    const onMatched = (data: {
+      partnerId: string;
+      initiator: boolean;
+    }) => {
       setPartnerId(data.partnerId);
       setStatus('Match found! 🎉');
+
+      // Give the UI a moment, then open real video call.
+      setTimeout(() => {
+        router.replace({
+          pathname: '/call',
+          params: {
+            partnerId: data.partnerId,
+            initiator: data.initiator ? 'true' : 'false',
+          },
+        });
+      }, 700);
     };
 
     const onPartnerLeft = () => {
@@ -48,7 +53,6 @@ export default function MatchScreen() {
     };
 
     socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
     socket.on('waiting', onWaiting);
     socket.on('matched', onMatched);
     socket.on('partner_left', onPartnerLeft);
@@ -57,7 +61,6 @@ export default function MatchScreen() {
 
     return () => {
       socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
       socket.off('waiting', onWaiting);
       socket.off('matched', onMatched);
       socket.off('partner_left', onPartnerLeft);
@@ -87,15 +90,10 @@ export default function MatchScreen() {
           </Text>
         </View>
 
-        <View style={styles.connectionRow}>
-          <View
-            style={[
-              styles.dot,
-              connected ? styles.online : styles.offline,
-            ]}
-          />
-          <Text style={styles.connectionText}>
-            {connected ? 'Server connected' : 'Server disconnected'}
+        <View style={styles.onlineRow}>
+          <View style={styles.onlineDot} />
+          <Text style={styles.onlineText}>
+            {partnerId ? 'User found' : 'Server connected'}
           </Text>
         </View>
 
@@ -104,21 +102,25 @@ export default function MatchScreen() {
         {partnerId ? (
           <>
             <Text style={styles.partner}>
-              Connected to a random user
+              Connecting video call...
             </Text>
 
-            <Pressable
-              style={styles.nextButton}
-              onPress={handleNext}
-            >
-              <Text style={styles.buttonText}>Next</Text>
-            </Pressable>
+            <ActivityIndicator
+              size="large"
+              style={styles.loader}
+            />
           </>
         ) : (
-          <ActivityIndicator
-            size="large"
-            style={styles.loader}
-          />
+          <>
+            <Text style={styles.partner}>
+              Finding a real user for you
+            </Text>
+
+            <ActivityIndicator
+              size="large"
+              style={styles.loader}
+            />
+          </>
         )}
 
         <Pressable
@@ -140,20 +142,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
+
   logo: {
     color: '#35d07f',
     fontSize: 30,
     fontWeight: '900',
     marginBottom: 35,
   },
+
   card: {
     width: '100%',
     maxWidth: 420,
     backgroundColor: '#10181e',
-    borderRadius: 24,
+    borderRadius: 26,
     padding: 30,
     alignItems: 'center',
   },
+
   avatar: {
     width: 110,
     height: 110,
@@ -162,62 +167,59 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   avatarText: {
     fontSize: 48,
   },
-  connectionRow: {
+
+  onlineRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 20,
+    marginTop: 28,
   },
-  dot: {
+
+  onlineDot: {
     width: 9,
     height: 9,
     borderRadius: 5,
+    backgroundColor: '#35d07f',
     marginRight: 8,
   },
-  online: {
-    backgroundColor: '#35d07f',
-  },
-  offline: {
-    backgroundColor: '#d9534f',
-  },
-  connectionText: {
+
+  onlineText: {
     color: '#8b9aa3',
-    fontSize: 13,
+    fontSize: 15,
+    fontWeight: '600',
   },
+
   title: {
     color: '#fff',
-    fontSize: 21,
-    fontWeight: '800',
+    fontSize: 23,
+    fontWeight: '900',
     marginTop: 18,
     textAlign: 'center',
   },
+
   partner: {
     color: '#8b9aa3',
-    marginTop: 8,
+    fontSize: 15,
+    marginTop: 9,
+    textAlign: 'center',
   },
+
   loader: {
-    marginTop: 25,
+    marginTop: 24,
   },
-  nextButton: {
-    backgroundColor: '#35d07f',
-    paddingHorizontal: 55,
-    paddingVertical: 15,
-    borderRadius: 28,
-    marginTop: 25,
-  },
-  buttonText: {
-    color: '#06100b',
-    fontSize: 17,
-    fontWeight: '800',
-  },
+
   backButton: {
-    marginTop: 20,
-    padding: 10,
+    marginTop: 30,
+    paddingHorizontal: 25,
+    paddingVertical: 10,
   },
+
   backText: {
     color: '#8b9aa3',
+    fontSize: 16,
     fontWeight: '700',
   },
 });
