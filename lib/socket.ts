@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 
-const SERVER_URL = 'http://127.0.0.1:3000';
+const SERVER_URL = 'https://randomvideoapps.onrender.com';
 
 export const socket = io(SERVER_URL, {
   autoConnect: false,
