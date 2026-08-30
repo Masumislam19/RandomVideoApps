@@ -7,19 +7,32 @@ import {
   View,
 } from 'react-native';
 import { router } from 'expo-router';
-import { socket, connectSocket, disconnectSocket } from '@/lib/socket';
+import {
+  socket,
+  connectSocket,
+  disconnectSocket,
+} from '@/lib/socket';
 
 export default function MatchScreen() {
   const [status, setStatus] = useState('Connecting...');
   const [partnerId, setPartnerId] = useState<string | null>(null);
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     const onConnect = () => {
+      setConnected(true);
       setStatus('Finding someone...');
       socket.emit('find_match');
     };
 
+    const onDisconnect = () => {
+      setConnected(false);
+      setPartnerId(null);
+      setStatus('Server disconnected');
+    };
+
     const onWaiting = () => {
+      setPartnerId(null);
       setStatus('Waiting for someone...');
     };
 
@@ -35,6 +48,7 @@ export default function MatchScreen() {
     };
 
     socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
     socket.on('waiting', onWaiting);
     socket.on('matched', onMatched);
     socket.on('partner_left', onPartnerLeft);
@@ -43,6 +57,7 @@ export default function MatchScreen() {
 
     return () => {
       socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
       socket.off('waiting', onWaiting);
       socket.off('matched', onMatched);
       socket.off('partner_left', onPartnerLeft);
@@ -72,6 +87,18 @@ export default function MatchScreen() {
           </Text>
         </View>
 
+        <View style={styles.connectionRow}>
+          <View
+            style={[
+              styles.dot,
+              connected ? styles.online : styles.offline,
+            ]}
+          />
+          <Text style={styles.connectionText}>
+            {connected ? 'Server connected' : 'Server disconnected'}
+          </Text>
+        </View>
+
         <Text style={styles.title}>{status}</Text>
 
         {partnerId ? (
@@ -80,15 +107,24 @@ export default function MatchScreen() {
               Connected to a random user
             </Text>
 
-            <Pressable style={styles.nextButton} onPress={handleNext}>
+            <Pressable
+              style={styles.nextButton}
+              onPress={handleNext}
+            >
               <Text style={styles.buttonText}>Next</Text>
             </Pressable>
           </>
         ) : (
-          <ActivityIndicator size="large" />
+          <ActivityIndicator
+            size="large"
+            style={styles.loader}
+          />
         )}
 
-        <Pressable style={styles.backButton} onPress={handleBack}>
+        <Pressable
+          style={styles.backButton}
+          onPress={handleBack}
+        >
           <Text style={styles.backText}>Back</Text>
         </Pressable>
       </View>
@@ -129,16 +165,40 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: 48,
   },
+  connectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  dot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  online: {
+    backgroundColor: '#35d07f',
+  },
+  offline: {
+    backgroundColor: '#d9534f',
+  },
+  connectionText: {
+    color: '#8b9aa3',
+    fontSize: 13,
+  },
   title: {
     color: '#fff',
     fontSize: 21,
     fontWeight: '800',
-    marginTop: 25,
+    marginTop: 18,
     textAlign: 'center',
   },
   partner: {
     color: '#8b9aa3',
     marginTop: 8,
+  },
+  loader: {
+    marginTop: 25,
   },
   nextButton: {
     backgroundColor: '#35d07f',
