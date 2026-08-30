@@ -54,6 +54,7 @@
           }
         }
       ],
+      "@config-plugins/react-native-webrtc"
     ],
     "experiments": {
       "typedRoutes": true,
