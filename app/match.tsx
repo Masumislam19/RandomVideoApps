@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -17,7 +17,14 @@ export default function MatchScreen() {
   const [status, setStatus] = useState('Connecting...');
   const [partnerId, setPartnerId] = useState<string | null>(null);
 
+  // IMPORTANT:
+  // When Match -> Call happens, keep the SAME socket connection alive.
+  // Otherwise the server forgets the partner relationship.
+  const goingToCallRef = useRef(false);
+
   useEffect(() => {
+    goingToCallRef.current = false;
+
     const onConnect = () => {
       setStatus('Finding someone...');
       socket.emit('find_match');
@@ -34,7 +41,9 @@ export default function MatchScreen() {
       setPartnerId(data.partnerId);
       setStatus('Match found! 🎉');
 
-      // Give the UI a moment, then open real video call.
+      // Keep socket connected while navigating to Call.
+      goingToCallRef.current = true;
+
       setTimeout(() => {
         router.replace({
           pathname: '/call' as any,
@@ -43,13 +52,18 @@ export default function MatchScreen() {
             initiator: data.initiator ? 'true' : 'false',
           },
         });
-      }, 700);
+      }, 500);
     };
 
     const onPartnerLeft = () => {
+      if (goingToCallRef.current) return;
+
       setPartnerId(null);
       setStatus('Partner left. Finding someone else...');
-      socket.emit('find_match');
+
+      if (socket.connected) {
+        socket.emit('find_match');
+      }
     };
 
     socket.on('connect', onConnect);
@@ -57,24 +71,36 @@ export default function MatchScreen() {
     socket.on('matched', onMatched);
     socket.on('partner_left', onPartnerLeft);
 
-    connectSocket();
+    if (socket.connected) {
+      onConnect();
+    } else {
+      connectSocket();
+    }
 
     return () => {
       socket.off('connect', onConnect);
       socket.off('waiting', onWaiting);
       socket.off('matched', onMatched);
       socket.off('partner_left', onPartnerLeft);
-      disconnectSocket();
+
+      // DO NOT disconnect when going to /call.
+      if (!goingToCallRef.current) {
+        disconnectSocket();
+      }
     };
   }, []);
 
   function handleNext() {
+    if (socket.connected) {
+      socket.emit('next');
+    }
+
     setPartnerId(null);
     setStatus('Finding someone...');
-    socket.emit('next');
   }
 
   function handleBack() {
+    goingToCallRef.current = false;
     disconnectSocket();
     router.back();
   }
