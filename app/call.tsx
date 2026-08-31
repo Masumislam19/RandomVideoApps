@@ -25,6 +25,7 @@ type SignalAnswer = {
 
 export default function CallScreen() {
   const router = useRouter();
+
   const params = useLocalSearchParams<{
     partnerId?: string;
     initiator?: string;
@@ -39,20 +40,15 @@ export default function CallScreen() {
 
   const [localStream, setLocalStream] = useState<any>(null);
   const [remoteStream, setRemoteStream] = useState<any>(null);
+
   const [status, setStatus] = useState('Starting video...');
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
 
-  const startingRef = useRef(false);
+  const startedRef = useRef(false);
   const cleanedRef = useRef(false);
-
-  useEffect(() => {
-    startCall();
-
-    return () => {
-      cleanup();
-    };
-  }, []);
+  const remoteDescriptionSetRef = useRef(false);
+  const pendingIceRef = useRef<any[]>([]);
 
   async function loadWebRTC() {
     if (webrtcRef.current) {
@@ -65,84 +61,23 @@ export default function CallScreen() {
     return module;
   }
 
-  async function startCall() {
-    if (startingRef.current) return;
+  async function flushPendingIce() {
+    const peer = peerRef.current;
 
-    startingRef.current = true;
-    cleanedRef.current = false;
-
-    try {
-      setStatus('Loading video system...');
-
-      const WebRTC = await loadWebRTC();
-
-      setStatus('Requesting camera & microphone...');
-
-      const stream = await WebRTC.mediaDevices.getUserMedia({
-        audio: true,
-        video: {
-          facingMode: 'user',
-          width: 640,
-          height: 480,
-          frameRate: 30,
-        },
-      });
-
-      if (cleanedRef.current) {
-        stream.getTracks().forEach((track: any) => track.stop());
-        return;
-      }
-
-      localStreamRef.current = stream;
-      setLocalStream(stream);
-
-      setStatus('Connecting to server...');
-
-      if (!socket.connected) {
-        connectSocket();
-      }
-
-      if (socket.connected) {
-        setupMatch();
-      } else {
-        socket.once('connect', setupMatch);
-      }
-    } catch (error) {
-      console.log('Start call error:', error);
-
-      setStatus('Camera & microphone required');
-
-      Alert.alert(
-        'Camera & Microphone',
-        'Please allow camera and microphone permission to use video chat.',
-      );
+    if (!peer || !remoteDescriptionSetRef.current) {
+      return;
     }
-  }
 
-  function setupMatch() {
-    if (cleanedRef.current) return;
+    const pending = [...pendingIceRef.current];
+    pendingIceRef.current = [];
 
-    console.log('Call screen socket:', socket.id);
-    console.log('Partner:', partnerId);
-    console.log('Initiator:', initiator);
-
-    setStatus('Preparing video connection...');
-
-    /*
-     * Match screen already matched these two users.
-     * Do NOT call find_match again here.
-     *
-     * The server keeps the partner relationship on the socket.
-     */
-    setTimeout(() => {
-      if (cleanedRef.current) return;
-
-      if (initiator) {
-        createOffer();
-      } else {
-        setStatus('Waiting for video connection...');
+    for (const candidate of pending) {
+      try {
+        await peer.addIceCandidate(candidate);
+      } catch (error) {
+        console.log('Queued ICE error:', error);
       }
-    }, 300);
+    }
   }
 
   async function createPeer() {
@@ -173,53 +108,79 @@ export default function CallScreen() {
       });
     }
 
-    (peer as any).addEventListener('icecandidate', (event: any) => {
-      if (!event.candidate) return;
+    (peer as any).addEventListener(
+      'icecandidate',
+      (event: any) => {
+        if (!event?.candidate) {
+          return;
+        }
 
-      socket.emit('ice-candidate', {
-        candidate: event.candidate,
-      });
-    });
+        if (!socket.connected) {
+          console.log('Socket not connected; ICE not sent');
+          return;
+        }
 
-    (peer as any).addEventListener('track', (event: any) => {
-      console.log('Remote video track received');
+        socket.emit('ice-candidate', {
+          candidate: event.candidate,
+        });
+      },
+    );
 
-      if (event.streams && event.streams.length > 0) {
-        setRemoteStream(event.streams[0]);
-        setStatus('Connected');
-      }
-    });
+    (peer as any).addEventListener(
+      'track',
+      (event: any) => {
+        console.log('REMOTE TRACK RECEIVED');
 
-    (peer as any).addEventListener('connectionstatechange', () => {
-      const state = peer.connectionState;
+        if (event?.streams?.length > 0) {
+          const stream = event.streams[0];
 
-      console.log('WebRTC state:', state);
+          setRemoteStream(stream);
+          setStatus('Connected');
+        }
+      },
+    );
 
-      if (state === 'connecting') {
-        setStatus('Connecting video...');
-      }
+    (peer as any).addEventListener(
+      'connectionstatechange',
+      () => {
+        const state = peer.connectionState;
 
-      if (state === 'connected') {
-        setStatus('Connected');
-      }
+        console.log('WebRTC connection state:', state);
 
-      if (state === 'disconnected') {
-        setStatus('Connection lost');
-      }
+        if (state === 'new') {
+          setStatus('Preparing video...');
+        }
 
-      if (state === 'failed') {
-        setStatus('Connection failed');
-      }
-    });
+        if (state === 'connecting') {
+          setStatus('Connecting video...');
+        }
+
+        if (state === 'connected') {
+          setStatus('Connected');
+        }
+
+        if (state === 'disconnected') {
+          setStatus('Connection interrupted');
+        }
+
+        if (state === 'failed') {
+          setStatus('Connection failed');
+        }
+
+        if (state === 'closed') {
+          setStatus('Call ended');
+        }
+      },
+    );
 
     return peer;
   }
 
   async function createOffer() {
     try {
-      setStatus('Calling...');
-
       const peer = await createPeer();
+
+      setStatus('Calling...');
 
       const offer = await peer.createOffer();
 
@@ -232,7 +193,7 @@ export default function CallScreen() {
         },
       });
 
-      console.log('Offer sent');
+      console.log('OFFER SENT');
     } catch (error) {
       console.log('Create offer error:', error);
       setStatus('Video connection error');
@@ -242,7 +203,7 @@ export default function CallScreen() {
   async function handleOffer(offer: SignalOffer) {
     try {
       if (!offer?.sdp) {
-        throw new Error('Offer SDP missing');
+        return;
       }
 
       setStatus('Receiving call...');
@@ -250,9 +211,13 @@ export default function CallScreen() {
       const peer = await createPeer();
 
       await peer.setRemoteDescription({
-        type: 'offer',
+        type: offer.type || 'offer',
         sdp: offer.sdp,
       });
+
+      remoteDescriptionSetRef.current = true;
+
+      await flushPendingIce();
 
       const answer = await peer.createAnswer();
 
@@ -265,7 +230,7 @@ export default function CallScreen() {
         },
       });
 
-      console.log('Answer sent');
+      console.log('ANSWER SENT');
     } catch (error) {
       console.log('Handle offer error:', error);
       setStatus('Video connection error');
@@ -274,18 +239,27 @@ export default function CallScreen() {
 
   async function handleAnswer(answer: SignalAnswer) {
     try {
-      if (!answer?.sdp) return;
+      if (!answer?.sdp) {
+        return;
+      }
 
       const peer = peerRef.current;
 
-      if (!peer) return;
+      if (!peer) {
+        console.log('Answer received before peer exists');
+        return;
+      }
 
       await peer.setRemoteDescription({
-        type: 'answer',
+        type: answer.type || 'answer',
         sdp: answer.sdp,
       });
 
-      console.log('Answer received');
+      remoteDescriptionSetRef.current = true;
+
+      await flushPendingIce();
+
+      console.log('ANSWER RECEIVED');
     } catch (error) {
       console.log('Handle answer error:', error);
     }
@@ -293,11 +267,26 @@ export default function CallScreen() {
 
   async function handleIceCandidate(candidate: any) {
     try {
+      if (!candidate) {
+        return;
+      }
+
       const peer = peerRef.current;
 
-      if (!peer || !candidate) return;
+      if (!peer || !remoteDescriptionSetRef.current) {
+        pendingIceRef.current.push(candidate);
+
+        console.log(
+          'ICE queued:',
+          pendingIceRef.current.length,
+        );
+
+        return;
+      }
 
       await peer.addIceCandidate(candidate);
+
+      console.log('ICE ADDED');
     } catch (error) {
       console.log('ICE candidate error:', error);
     }
@@ -305,22 +294,27 @@ export default function CallScreen() {
 
   function handlePartnerLeft() {
     cleanupPeer();
+
     setRemoteStream(null);
     setStatus('Partner left');
 
     setTimeout(() => {
-      if (cleanedRef.current) return;
-
-      router.replace('/match' as any);
+      if (!cleanedRef.current) {
+        router.replace('/match' as any);
+      }
     }, 700);
   }
 
   function toggleMic() {
     const stream = localStreamRef.current;
 
-    if (!stream) return;
+    if (!stream) {
+      return;
+    }
 
-    stream.getAudioTracks().forEach((track: any) => {
+    const tracks = stream.getAudioTracks();
+
+    tracks.forEach((track: any) => {
       track.enabled = !track.enabled;
     });
 
@@ -330,13 +324,73 @@ export default function CallScreen() {
   function toggleCamera() {
     const stream = localStreamRef.current;
 
-    if (!stream) return;
+    if (!stream) {
+      return;
+    }
 
-    stream.getVideoTracks().forEach((track: any) => {
+    const tracks = stream.getVideoTracks();
+
+    tracks.forEach((track: any) => {
       track.enabled = !track.enabled;
     });
 
     setCameraOn((value) => !value);
+  }
+
+  function cleanupPeer() {
+    pendingIceRef.current = [];
+    remoteDescriptionSetRef.current = false;
+
+    if (peerRef.current) {
+      try {
+        peerRef.current.close();
+      } catch (error) {
+        console.log('Peer close error:', error);
+      }
+
+      peerRef.current = null;
+    }
+  }
+
+  function stopLocalMedia() {
+    if (localStreamRef.current) {
+      localStreamRef.current
+        .getTracks()
+        .forEach((track: any) => {
+          try {
+            track.stop();
+          } catch {}
+        });
+
+      localStreamRef.current = null;
+    }
+
+    setLocalStream(null);
+  }
+
+  function cleanup() {
+    if (cleanedRef.current) {
+      return;
+    }
+
+    cleanedRef.current = true;
+
+    socket.off('offer', handleOffer);
+    socket.off('answer', handleAnswer);
+    socket.off('ice-candidate', handleIceCandidate);
+    socket.off('partner_left', handlePartnerLeft);
+
+    cleanupPeer();
+    stopLocalMedia();
+
+    setRemoteStream(null);
+
+    disconnectSocket();
+  }
+
+  function leaveCall() {
+    cleanup();
+    router.back();
   }
 
   function nextPerson() {
@@ -350,73 +404,111 @@ export default function CallScreen() {
     }
 
     setTimeout(() => {
-      if (cleanedRef.current) return;
-
-      router.replace('/match' as any);
-    }, 400);
+      if (!cleanedRef.current) {
+        router.replace('/match' as any);
+      }
+    }, 300);
   }
 
-  function cleanupPeer() {
-    if (peerRef.current) {
-      try {
-        peerRef.current.close();
-      } catch (error) {
-        console.log('Peer cleanup error:', error);
+  async function startCall() {
+    if (startedRef.current) {
+      return;
+    }
+
+    startedRef.current = true;
+    cleanedRef.current = false;
+
+    try {
+      setStatus('Loading video...');
+
+      const WebRTC = await loadWebRTC();
+
+      setStatus('Requesting camera & microphone...');
+
+      const stream =
+        await WebRTC.mediaDevices.getUserMedia({
+          audio: true,
+          video: {
+            facingMode: 'user',
+            width: 640,
+            height: 480,
+            frameRate: 30,
+          },
+        });
+
+      if (cleanedRef.current) {
+        stream
+          .getTracks()
+          .forEach((track: any) => track.stop());
+
+        return;
       }
 
-      peerRef.current = null;
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+
+      setStatus('Connecting video...');
+
+      if (!socket.connected) {
+        connectSocket();
+
+        socket.once('connect', () => {
+          if (cleanedRef.current) {
+            return;
+          }
+
+          beginNegotiation();
+        });
+      } else {
+        beginNegotiation();
+      }
+    } catch (error) {
+      console.log('START CALL ERROR:', error);
+
+      setStatus('Camera & microphone required');
+
+      Alert.alert(
+        'Camera & Microphone',
+        'Please allow camera and microphone permission to use video chat.',
+      );
     }
   }
 
-  function cleanup() {
-    if (cleanedRef.current) return;
-
-    cleanedRef.current = true;
-
-    socket.off('offer', handleOffer);
-    socket.off('answer', handleAnswer);
-    socket.off('ice-candidate', handleIceCandidate);
-    socket.off('partner_left', handlePartnerLeft);
-    socket.off('connect', setupMatch);
-
-    cleanupPeer();
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track: any) => {
-        track.stop();
-      });
-
-      localStreamRef.current = null;
+  async function beginNegotiation() {
+    if (cleanedRef.current) {
+      return;
     }
 
-    setRemoteStream(null);
+    console.log('Socket:', socket.id);
+    console.log('Partner:', partnerId);
+    console.log('Initiator:', initiator);
 
-    /*
-     * Disconnect only when leaving the call completely.
-     */
-    disconnectSocket();
-  }
+    setStatus('Preparing video connection...');
 
-  function leaveCall() {
-    cleanup();
-    router.back();
+    if (initiator) {
+      await createOffer();
+    } else {
+      setStatus('Waiting for video connection...');
+    }
   }
 
   useEffect(() => {
+    // IMPORTANT:
+    // Register signaling listeners BEFORE starting WebRTC.
     socket.on('offer', handleOffer);
     socket.on('answer', handleAnswer);
     socket.on('ice-candidate', handleIceCandidate);
     socket.on('partner_left', handlePartnerLeft);
 
+    startCall();
+
     return () => {
-      socket.off('offer', handleOffer);
-      socket.off('answer', handleAnswer);
-      socket.off('ice-candidate', handleIceCandidate);
-      socket.off('partner_left', handlePartnerLeft);
+      cleanup();
     };
   }, []);
 
-  const RTCViewComponent = webrtcRef.current?.RTCView;
+  const RTCViewComponent =
+    webrtcRef.current?.RTCView;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -460,20 +552,22 @@ export default function CallScreen() {
 
         {localStream && RTCViewComponent && (
           <View style={styles.localContainer}>
-            {React.createElement(RTCViewComponent, {
-              streamURL: localStream.toURL(),
-              style: styles.localVideo,
-              objectFit: 'cover',
-              mirror: true,
-            })}
+            <React.Fragment>
+              {React.createElement(RTCViewComponent, {
+                streamURL: localStream.toURL(),
+                style: styles.localVideo,
+                objectFit: 'cover',
+                mirror: true,
+              })}
 
-            {!cameraOn && (
-              <View style={styles.cameraOff}>
-                <Text style={styles.cameraOffText}>
-                  📷
-                </Text>
-              </View>
-            )}
+              {!cameraOn && (
+                <View style={styles.cameraOff}>
+                  <Text style={styles.cameraOffText}>
+                    📷
+                  </Text>
+                </View>
+              )}
+            </React.Fragment>
           </View>
         )}
 
@@ -602,6 +696,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 2,
     borderColor: '#ffffff',
+    backgroundColor: '#111820',
   },
 
   localVideo: {
@@ -698,10 +793,10 @@ const styles = StyleSheet.create({
   },
 
   statusBadge: {
-    maxWidth: 170,
+    maxWidth: 175,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.60)',
     paddingHorizontal: 11,
     paddingVertical: 8,
     borderRadius: 20,
