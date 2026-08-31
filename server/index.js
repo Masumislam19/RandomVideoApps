@@ -108,6 +108,19 @@ io.on('connection', (socket) => {
     });
   });
 
+  socket.on('chat-message', ({ text }) => {
+    if (typeof text !== 'string') return;
+
+    const cleanText = text.trim().slice(0, 500);
+    if (!cleanText) return;
+
+    relayToPartner(socket, 'chat-message', {
+      text: cleanText,
+      senderId: socket.id,
+      timestamp: Date.now(),
+    });
+  });
+
   socket.on('next', () => {
     const partnerId = socket.data.partnerId;
 
