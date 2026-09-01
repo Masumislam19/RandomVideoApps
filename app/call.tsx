@@ -128,8 +128,45 @@ export default function CallScreen() {
         }
 
         socket.emit('ice-candidate', {
-          candidate: event.candidate,
+          candidate: {
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+            usernameFragment: event.candidate.usernameFragment,
+          },
         });
+
+        console.log('ICE SENT');
+      },
+    );
+
+    (peer as any).addEventListener(
+      'icecandidateerror',
+      (event: any) => {
+        console.log('ICE CANDIDATE ERROR:', event);
+      },
+    );
+
+    (peer as any).addEventListener(
+      'iceconnectionstatechange',
+      () => {
+        console.log(
+          'ICE CONNECTION STATE:',
+          peer.iceConnectionState,
+        );
+
+        if (peer.iceConnectionState === 'checking') {
+          setStatus('Connecting video...');
+        }
+
+        if (peer.iceConnectionState === 'connected' ||
+            peer.iceConnectionState === 'completed') {
+          setStatus('Connected');
+        }
+
+        if (peer.iceConnectionState === 'failed') {
+          setStatus('Video connection failed');
+        }
       },
     );
 
