@@ -91,18 +91,21 @@ io.on('connection', (socket) => {
   });
 
   socket.on('offer', ({ offer }) => {
+    console.log('OFFER RELAY:', socket.id, '->', socket.data.partnerId);
     relayToPartner(socket, 'offer', {
       offer,
     });
   });
 
   socket.on('answer', ({ answer }) => {
+    console.log('ANSWER RELAY:', socket.id, '->', socket.data.partnerId);
     relayToPartner(socket, 'answer', {
       answer,
     });
   });
 
   socket.on('ice-candidate', ({ candidate }) => {
+    console.log('ICE RELAY:', socket.id, '->', socket.data.partnerId);
     relayToPartner(socket, 'ice-candidate', {
       candidate,
     });

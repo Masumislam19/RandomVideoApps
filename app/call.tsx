@@ -5,6 +5,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -44,6 +45,12 @@ export default function CallScreen() {
   const [status, setStatus] = useState('Starting video...');
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
+
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatText, setChatText] = useState('');
+  const [messages, setMessages] = useState<
+    { text: string; mine: boolean; timestamp: number }[]
+  >([]);
 
   const startedRef = useRef(false);
   const cleanedRef = useRef(false);
@@ -137,6 +144,27 @@ export default function CallScreen() {
           setRemoteStream(stream);
           setStatus('Connected');
         }
+      },
+    );
+
+    (peer as any).addEventListener(
+      'iceconnectionstatechange',
+      () => {
+        console.log('ICE CONNECTION STATE:', peer.iceConnectionState);
+      },
+    );
+
+    (peer as any).addEventListener(
+      'icegatheringstatechange',
+      () => {
+        console.log('ICE GATHERING STATE:', peer.iceGatheringState);
+      },
+    );
+
+    (peer as any).addEventListener(
+      'signalingstatechange',
+      () => {
+        console.log('SIGNALING STATE:', peer.signalingState);
       },
     );
 
@@ -292,6 +320,44 @@ export default function CallScreen() {
     }
   }
 
+  function handleChatMessage(payload: any) {
+    if (!payload || typeof payload.text !== 'string') return;
+
+    const text = payload.text.trim().slice(0, 500);
+    if (!text) return;
+
+    setMessages((current) => [
+      ...current,
+      {
+        text,
+        mine: false,
+        timestamp:
+          typeof payload.timestamp === 'number'
+            ? payload.timestamp
+            : Date.now(),
+      },
+    ]);
+  }
+
+  function sendChatMessage() {
+    const text = chatText.trim().slice(0, 500);
+
+    if (!text || !socket.connected) return;
+
+    socket.emit('chat-message', { text });
+
+    setMessages((current) => [
+      ...current,
+      {
+        text,
+        mine: true,
+        timestamp: Date.now(),
+      },
+    ]);
+
+    setChatText('');
+  }
+
   function handlePartnerLeft() {
     cleanupPeer();
 
@@ -379,6 +445,7 @@ export default function CallScreen() {
     socket.off('answer', handleAnswer);
     socket.off('ice-candidate', handleIceCandidate);
     socket.off('partner_left', handlePartnerLeft);
+    socket.off('chat-message', handleChatMessage);
 
     cleanupPeer();
     stopLocalMedia();
@@ -499,6 +566,7 @@ export default function CallScreen() {
     socket.on('answer', handleAnswer);
     socket.on('ice-candidate', handleIceCandidate);
     socket.on('partner_left', handlePartnerLeft);
+    socket.on('chat-message', handleChatMessage);
 
     startCall();
 
@@ -592,6 +660,72 @@ export default function CallScreen() {
         </View>
       </View>
 
+      {chatOpen && (
+        <View style={styles.chatPanel}>
+          <View style={styles.chatHeader}>
+            <Text style={styles.chatTitle}>Chat</Text>
+
+            <TouchableOpacity
+              onPress={() => setChatOpen(false)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.chatClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.messagesArea}>
+            {messages.length === 0 ? (
+              <Text style={styles.emptyChat}>
+                Say hello 👋
+              </Text>
+            ) : (
+              messages.map((message, index) => (
+                <View
+                  key={message.timestamp + '-' + index}
+                  style={[
+                    styles.messageBubble,
+                    message.mine
+                      ? styles.myMessage
+                      : styles.theirMessage,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.messageText,
+                      message.mine && styles.myMessageText,
+                    ]}
+                  >
+                    {message.text}
+                  </Text>
+                </View>
+              ))
+            )}
+          </View>
+
+          <View style={styles.chatInputRow}>
+            <TextInput
+              value={chatText}
+              onChangeText={(text) => setChatText(text.slice(0, 500))}
+              placeholder="Type a message..."
+              placeholderTextColor="#70808a"
+              style={styles.chatInput}
+              maxLength={500}
+              multiline
+              returnKeyType="send"
+              onSubmitEditing={sendChatMessage}
+            />
+
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={sendChatMessage}
+              style={styles.sendButton}
+            >
+              <Text style={styles.sendButtonText}>➤</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       <View style={styles.bottomPanel}>
         <View style={styles.controlRow}>
           <TouchableOpacity
@@ -626,6 +760,18 @@ export default function CallScreen() {
             <Text style={styles.controlLabel}>
               {cameraOn ? 'Camera' : 'Off'}
             </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setChatOpen((value) => !value)}
+            style={[
+              styles.controlButton,
+              chatOpen && styles.chatButtonActive,
+            ]}
+          >
+            <Text style={styles.controlIcon}>💬</Text>
+            <Text style={styles.controlLabel}>Chat</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -814,6 +960,120 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 10,
     fontWeight: '700',
+  },
+
+  chatPanel: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: 82,
+    height: 330,
+    backgroundColor: '#0b171f',
+    borderRadius: 20,
+    padding: 12,
+    zIndex: 20,
+    borderWidth: 1,
+    borderColor: '#20333e',
+  },
+
+  chatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 10,
+  },
+
+  chatTitle: {
+    color: '#ffffff',
+    fontSize: 17,
+    fontWeight: '900',
+  },
+
+  chatClose: {
+    color: '#aebbc3',
+    fontSize: 20,
+    paddingHorizontal: 5,
+  },
+
+  messagesArea: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    paddingVertical: 5,
+  },
+
+  emptyChat: {
+    color: '#70808a',
+    textAlign: 'center',
+    fontSize: 13,
+    marginBottom: 10,
+  },
+
+  messageBubble: {
+    maxWidth: '78%',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 16,
+    marginVertical: 3,
+  },
+
+  myMessage: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#ffffff',
+    borderBottomRightRadius: 5,
+  },
+
+  theirMessage: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#162832',
+    borderBottomLeftRadius: 5,
+  },
+
+  messageText: {
+    color: '#d8e1e5',
+    fontSize: 13,
+  },
+
+  myMessageText: {
+    color: '#071017',
+  },
+
+  chatInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginTop: 8,
+  },
+
+  chatInput: {
+    flex: 1,
+    minHeight: 44,
+    maxHeight: 80,
+    backgroundColor: '#14232c',
+    color: '#ffffff',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+  },
+
+  sendButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 7,
+  },
+
+  sendButtonText: {
+    color: '#071017',
+    fontSize: 20,
+    fontWeight: '900',
+  },
+
+  chatButtonActive: {
+    borderWidth: 1,
+    borderColor: '#ffffff',
   },
 
   bottomPanel: {
