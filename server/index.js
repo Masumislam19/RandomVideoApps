@@ -69,20 +69,26 @@ function findMatch(socket) {
   socket.emit('waiting');
 }
 
-function relayToPartner(socket, event, payload) {
-  const partnerId = socket.data.partnerId;
+function relayToPartner(socket, event, payload, explicitPartnerId = null) {
+  const partnerId = explicitPartnerId || socket.data.partnerId;
 
   if (!partnerId) {
-    return;
+    console.log('RELAY FAILED: no partnerId', event, socket.id);
+    return false;
   }
 
   const partner = io.sockets.sockets.get(partnerId);
 
-  if (partner) {
-    partner.emit(event, payload);
+  if (!partner) {
+    console.log('RELAY FAILED: partner not found', event, partnerId);
+    return false;
   }
-}
 
+  partner.emit(event, payload);
+
+  console.log('RELAY SUCCESS:', event, socket.id, '->', partnerId);
+  return true;
+}
 io.on('connection', (socket) => {
   console.log('Connected:', socket.id);
 
@@ -90,25 +96,52 @@ io.on('connection', (socket) => {
     findMatch(socket);
   });
 
-  socket.on('offer', ({ offer }) => {
-    console.log('OFFER RELAY:', socket.id, '->', socket.data.partnerId);
-    relayToPartner(socket, 'offer', {
-      offer,
-    });
+  socket.on('offer', ({ offer, partnerId }) => {
+    console.log(
+      'OFFER RELAY:',
+      socket.id,
+      '->',
+      partnerId || socket.data.partnerId,
+    );
+
+    relayToPartner(
+      socket,
+      'offer',
+      { offer },
+      partnerId,
+    );
   });
 
-  socket.on('answer', ({ answer }) => {
-    console.log('ANSWER RELAY:', socket.id, '->', socket.data.partnerId);
-    relayToPartner(socket, 'answer', {
-      answer,
-    });
+  socket.on('answer', ({ answer, partnerId }) => {
+    console.log(
+      'ANSWER RELAY:',
+      socket.id,
+      '->',
+      partnerId || socket.data.partnerId,
+    );
+
+    relayToPartner(
+      socket,
+      'answer',
+      { answer },
+      partnerId,
+    );
   });
 
-  socket.on('ice-candidate', ({ candidate }) => {
-    console.log('ICE RELAY:', socket.id, '->', socket.data.partnerId);
-    relayToPartner(socket, 'ice-candidate', {
-      candidate,
-    });
+  socket.on('ice-candidate', ({ candidate, partnerId }) => {
+    console.log(
+      'ICE RELAY:',
+      socket.id,
+      '->',
+      partnerId || socket.data.partnerId,
+    );
+
+    relayToPartner(
+      socket,
+      'ice-candidate',
+      { candidate },
+      partnerId,
+    );
   });
 
   socket.on('chat-message', ({ text }) => {

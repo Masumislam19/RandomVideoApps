@@ -43,6 +43,11 @@ export default function CallScreen() {
   const [remoteStream, setRemoteStream] = useState<any>(null);
 
   const [status, setStatus] = useState('Starting video...');
+  const [debugIce, setDebugIce] = useState('new');
+  const [debugConnection, setDebugConnection] = useState('new');
+  const [debugSocket, setDebugSocket] = useState(socket.connected ? 'connected' : 'disconnected');
+  const [debugPeer, setDebugPeer] = useState('not-created');
+  const [debugStage, setDebugStage] = useState('idle');
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
 
@@ -106,6 +111,8 @@ export default function CallScreen() {
     });
 
     peerRef.current = peer;
+    setDebugPeer('created');
+    setDebugConnection(peer.connectionState);
 
     const stream = localStreamRef.current;
 
@@ -128,6 +135,7 @@ export default function CallScreen() {
         }
 
         socket.emit('ice-candidate', {
+          partnerId,
           candidate: {
             candidate: event.candidate.candidate,
             sdpMid: event.candidate.sdpMid,
@@ -188,6 +196,7 @@ export default function CallScreen() {
       'iceconnectionstatechange',
       () => {
         console.log('ICE CONNECTION STATE:', peer.iceConnectionState);
+        setDebugIce(peer.iceConnectionState);
       },
     );
 
@@ -211,6 +220,8 @@ export default function CallScreen() {
         const state = peer.connectionState;
 
         console.log('WebRTC connection state:', state);
+        setDebugConnection(state);
+        setDebugConnection(state);
 
         if (state === 'new') {
           setStatus('Preparing video...');
@@ -243,15 +254,22 @@ export default function CallScreen() {
 
   async function createOffer() {
     try {
+      setDebugStage('createPeer');
       const peer = await createPeer();
 
       setStatus('Calling...');
+      setDebugStage('createOffer-start');
 
       const offer = await peer.createOffer();
 
+      setDebugStage('createOffer-done');
+
       await peer.setLocalDescription(offer);
 
+      setDebugStage('localDescription-set');
+
       socket.emit('offer', {
+        partnerId,
         offer: {
           type: offer.type,
           sdp: offer.sdp,
@@ -259,6 +277,7 @@ export default function CallScreen() {
       });
 
       console.log('OFFER SENT');
+      setDebugStage('offer-sent');
     } catch (error) {
       console.log('Create offer error:', error);
       setStatus('Video connection error');
@@ -289,6 +308,7 @@ export default function CallScreen() {
       await peer.setLocalDescription(answer);
 
       socket.emit('answer', {
+        partnerId,
         answer: {
           type: answer.type,
           sdp: answer.sdp,
@@ -296,8 +316,10 @@ export default function CallScreen() {
       });
 
       console.log('ANSWER SENT');
+      setDebugStage('answer-sent');
     } catch (error) {
       console.log('Handle offer error:', error);
+      setDebugStage('offer-error');
       setStatus('Video connection error');
     }
   }
@@ -325,6 +347,7 @@ export default function CallScreen() {
       await flushPendingIce();
 
       console.log('ANSWER RECEIVED');
+      setDebugStage('answer-received');
     } catch (error) {
       console.log('Handle answer error:', error);
     }
@@ -579,6 +602,7 @@ export default function CallScreen() {
   }
 
   async function beginNegotiation() {
+    setDebugSocket(socket.connected ? 'connected' : 'disconnected');
     if (cleanedRef.current) {
       return;
     }
@@ -694,6 +718,39 @@ export default function CallScreen() {
               {status}
             </Text>
           </View>
+        </View>
+
+        <View
+          style={{
+            position: 'absolute',
+            top: 105,
+            left: 12,
+            right: 12,
+            padding: 10,
+            backgroundColor: 'rgba(0,0,0,0.78)',
+            borderRadius: 10,
+            zIndex: 999,
+          }}
+        >
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+            DEBUG • ICE: {debugIce} • PC: {debugConnection}
+          </Text>
+
+          <Text style={{ color: '#fff', fontSize: 11, marginTop: 3 }}>
+            Socket: {debugSocket} • Peer: {debugPeer}
+          </Text>
+
+          <Text style={{ color: '#fff', fontSize: 11, marginTop: 3 }}>
+            Initiator: {initiator ? 'YES' : 'NO'} • Partner: {partnerId ? 'YES' : 'NO'}
+          </Text>
+
+          <Text style={{ color: '#fff', fontSize: 11, marginTop: 3 }}>
+            Stage: {debugStage}
+          </Text>
+
+          <Text style={{ color: '#fff', fontSize: 11, marginTop: 3 }}>
+            Remote video: {remoteStream ? 'YES' : 'NO'}
+          </Text>
         </View>
       </View>
 
